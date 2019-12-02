@@ -179,6 +179,7 @@ class CompositeGenerator(BaseNetwork):
         self.loadSize = loadSize
         self.ngf = ngf
         self.encoder = ConvEncoder(opt)
+        self.n_blocks = n_blocks
         activation = nn.ReLU(True)
         # CHANGES :
         ## TOP LEFT
@@ -243,18 +244,19 @@ class CompositeGenerator(BaseNetwork):
         #     model_seg += [nn.Conv2d(input_nc, self.ngf, 3, padding=1)]
 
         ## BOTTOM LEFT NEW
-        model_down_img = [nn.ReflectionPad2d(1), nn.Conv2d(prev_output_nc, self.ngf//2, kernel_size=3, padding=0, stride=2), norm_layer(self.ngf), activation, nn.ReflectionPad2d(1), nn.Conv2d(self.ngf//2, self.ngf, kernel_size=3, padding=0, stride=2), norm_layer(self.ngf), activation]
+        model_down_img = [nn.ReflectionPad2d(1), nn.Conv2d(prev_output_nc, self.ngf//2, kernel_size=3, padding=0, stride=1), norm_layer(self.ngf//2), activation, nn.ReflectionPad2d(1), nn.Conv2d(self.ngf//2, self.ngf, kernel_size=3, padding=0, stride=1), norm_layer(self.ngf), activation]
+        model_down_img_srb = []
         for i in range(n_blocks):
-            model_down_img += [SPADEResnetBlock(self.ngf, self.ngf, opt)] #copy.deepcopy(model_down_seg[4:])
+            model_down_img_srb += [SPADEResnetBlock(self.ngf, self.ngf, opt)] #copy.deepcopy(model_down_seg[4:])
 
         ## TOP RIGHT NEW
-        model_up_img = []
+        model_up_img_srb1 = []
         for i in range(n_blocks-3):
-            model_up_img += [SPADEResnetBlock(self.ngf, self.ngf, opt)]
-        model_up_img += [nn.Upsample(scale_factor=2)]
+            model_up_img_srb1 += [SPADEResnetBlock(self.ngf, self.ngf, opt)]
+        model_up_img_upsample = nn.Upsample(scale_factor=2)
+        model_up_img_srb2 = []
         for i in range(1, n_blocks - 3):
-            model_up_img += [SPADEResnetBlock(self.ngf//2**(i-1), self.ngf//2**i, opt)]
-        model_up_img += [nn.Upsample(scale_factor=2)]
+            model_up_img_srb2 += [SPADEResnetBlock(self.ngf//2**(i-1), self.ngf//2**i, opt)]
 
         model_final_img = [nn.ReflectionPad2d(3), nn.Conv2d(self.ngf//2**3, output_nc, kernel_size=7, padding=0), nn.Tanh()]
 
@@ -286,8 +288,11 @@ class CompositeGenerator(BaseNetwork):
         # self.model_seg = nn.Sequential(*model_seg)
         #BOTTOM LEFT
         self.model_down_img = nn.Sequential(*model_down_img)
+        self.model_down_img_srb = nn.Sequential(*model_down_img_srb)
         #TOP RIGHT
-        self.model_up_img = nn.Sequential(*model_up_img)
+        self.model_up_img_srb1 = nn.Sequential(*model_up_img_srb1)
+        self.model_up_img_srb2 = nn.Sequential(*model_up_img_srb2)
+        self.model_up_img_upsample = model_up_img_upsample
         #OUTPUT TOP RIGHT
         self.model_final_img = nn.Sequential(*model_final_img)
 
@@ -297,23 +302,34 @@ class CompositeGenerator(BaseNetwork):
             self.model_final_flow = nn.Sequential(*model_final_flow)
             self.model_final_w = nn.Sequential(*model_final_w)
 
-    def forward(self, input, img_prev, mask, img_feat_coarse, flow_feat_coarse, img_fg_feat_coarse, use_raw_only):
+    def forward(self, input, real_img, img_prev, mask, img_feat_coarse, flow_feat_coarse, img_fg_feat_coarse, use_raw_only):
         # input = self.model_seg(input)
 
         # resize the z from convEncoder
-        z = self.encoder() # pass real_B
+        mu, logvar = self.encoder(real_img) # pass real_B
+        z = self.reparameterize(mu, logvar)
         #x = z.view(1, self.ngf, self.loadSize, self.loadSize*2)
         x = self.model_lin(z)
-        x = x.view(-1, self.ngf // (2 ** 4), self.sh, self.sw)
+        x = x.view(-1, self.ngf // (2 ** 4), self.sw, self.sh)
 
         # TOP LEFT
         for srb in self.model_srb_seg:
             x = srb(x, input)
 
         #TOP LEFT + BOTTOM LEFT
-        downsample = x + self.model_down_img(img_prev)
+        img_prev = self.model_down_img(img_prev)
+        for srb in self.model_down_img_srb:
+            img_prev = srb(img_prev, input)
+        downsample = x + img_prev
+
         # TOP RIGHT
-        img_feat = self.model_up_img(downsample)
+        for srb in self.model_up_img_srb1:
+            downsample = srb(downsample, input)
+        downsample = self.model_up_img_upsample(downsample)
+        for srb in self.model_up_img_srb2:
+            downsample = srb(downsample, input)
+        img_feat = self.model_up_img_upsample(downsample)
+
         img_raw = self.model_final_img(img_feat)
 
         flow = weight = flow_feat = None
@@ -340,6 +356,11 @@ class CompositeGenerator(BaseNetwork):
             img_raw = img_fg * mask + img_raw * (1-mask)                 
 
         return img_final, flow, weight, img_raw, img_feat, flow_feat, img_fg_feat
+
+    def reparameterize(self, mu, logvar):
+        std = torch.exp(0.5 * logvar)
+        eps = torch.randn_like(std)
+        return eps.mul(std) + mu
 
 class CompositeLocalGenerator(BaseNetwork):
     def __init__(self, opt, input_nc, output_nc, prev_output_nc, ngf, n_downsampling, loadSize, n_blocks_local, use_fg_model=False, no_flow=False, norm_layer=nn.BatchNorm2d, padding_type='reflect', scale=1):
@@ -763,8 +784,8 @@ class ConvEncoder(BaseNetwork):
             self.layer6 = norm_layer(nn.Conv2d(ndf * 8, ndf * 8, kw, stride=2, padding=pw))
 
         self.so = s0 = 4
-        self.fc_mu = nn.Linear(ndf * 8 * s0 * s0, 256)
-        self.fc_var = nn.Linear(ndf * 8 * s0 * s0, 256)
+        self.fc_mu = nn.Linear(ndf * 4 * s0 * s0, 256)
+        self.fc_var = nn.Linear(ndf * 4 * s0 * s0, 256)
 
         self.actvn = nn.LeakyReLU(0.2, False)
         self.opt = opt

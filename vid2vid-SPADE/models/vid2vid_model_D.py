@@ -232,7 +232,7 @@ class Vid2VidModelD(BaseModel):
     def get_all_skipped_frames(self, frames_all, real_B, fake_B, flow_ref, conf_ref, t_scales, tD, n_frames_load, i, flowNet):
         real_B_all, fake_B_all, flow_ref_all, conf_ref_all = frames_all
         if t_scales > 0:
-            if self.opt.sparse_D:          
+            if self.opt.sparse_D:
                 real_B_all, real_B_skipped = get_skipped_frames_sparse(real_B_all, real_B, t_scales, tD, n_frames_load, i)
                 fake_B_all, fake_B_skipped = get_skipped_frames_sparse(fake_B_all, fake_B, t_scales, tD, n_frames_load, i)
                 flow_ref_all, flow_ref_skipped = get_skipped_frames_sparse(flow_ref_all, flow_ref, t_scales, tD, n_frames_load, i, is_flow=True)

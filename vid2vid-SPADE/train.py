@@ -57,7 +57,7 @@ def train():
                 ####### discriminator            
                 ### individual frame discriminator          
                 real_B_prev, real_B = real_Bp[:, :-1], real_Bp[:, 1:]   # the collection of previous and current real frames
-                flow_ref, conf_ref = flowNet(real_B, real_B_prev)       # reference flows and confidences                
+                flow_ref, conf_ref = flowNet(real_B, real_B_prev)       # reference flows and confidences
                 fake_B_prev = modelG.module.compute_fake_B_prev(real_B_prev, fake_B_prev_last, fake_B)
                 fake_B_prev_last = fake_B_last
                

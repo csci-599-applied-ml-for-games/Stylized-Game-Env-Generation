@@ -18,6 +18,7 @@ class BaseOptions():
         self.parser.add_argument('--output_nc', type=int, default=3, help='# of output image channels')
         self.parser.add_argument('--z_dim', type=int, default=256, help="dimension of the latent z vector")
         self.parser.add_argument('--aspect_ratio', type=float, default=1.0, help='The ratio width/height. The final height of the load image will be crop_size/aspect_ratio')
+        self.parser.add_argument('--crop_size', type=int, default=512, help='Crop to the width of crop_size (after initially scaling the images to load_size.)')
 
         # network arch
         self.parser.add_argument('--netG', type=str, default='composite', help='selects model to use for netG')        

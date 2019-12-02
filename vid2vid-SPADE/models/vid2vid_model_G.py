@@ -119,8 +119,8 @@ class Vid2VidModelG(BaseModel):
         return input_map, real_image, pool_map
 
     def forward(self, input_A, input_B, inst_A, fake_B_prev, dummy_bs=0):
-        tG = self.opt.n_frames_G           
-        gpu_split_id = self.opt.n_gpus_gen + 1        
+        tG = self.opt.n_frames_G
+        gpu_split_id = self.opt.n_gpus_gen + 1
         if input_A.get_device() == self.gpu_ids[0]:
             input_A, input_B, inst_A, fake_B_prev = util.remove_dummy_from_tensor([input_A, input_B, inst_A, fake_B_prev], dummy_bs)
             if input_A.size(0) == 0: return self.return_dummy(input_A)
@@ -148,11 +148,11 @@ class Vid2VidModelG(BaseModel):
         n_frames_load = self.n_frames_load
         n_scales = self.n_scales
         finetune_all = self.finetune_all
-        dest_id = self.gpu_ids[0] if self.split_gpus else start_gpu        
+        dest_id = self.gpu_ids[0] if self.split_gpus else start_gpu
 
         ### generate inputs   
-        real_A_pyr = self.build_pyr(real_A_all)        
-        fake_Bs_raw, flows, weights = None, None, None            
+        real_A_pyr = self.build_pyr(real_A_all)
+        fake_Bs_raw, flows, weights = None, None, None
         
         ### sequentially generate each frame
         for t in range(n_frames_load):
@@ -166,10 +166,10 @@ class Vid2VidModelG(BaseModel):
                 ### prepare inputs
                 # 1. input labels
                 real_As = real_A_pyr[si]
-                _, _, _, h, w = real_As.size()                  
+                _, _, _, h, w = real_As.size()
                 real_As_reshaped = real_As[:, t:t+tG,...].view(self.bs, -1, h, w).cuda(gpu_id)
 
-                # 2. previous fake_Bs                
+                # 2. previous fake_Bs
                 fake_B_prevs = fake_B_pyr[si][:, t:t+tG-1,...].cuda(gpu_id)
                 if (t % self.n_frames_bp) == 0:
                     fake_B_prevs = fake_B_prevs.detach()
@@ -181,7 +181,7 @@ class Vid2VidModelG(BaseModel):
 
                 ### network forward
                 fake_B, flow, weight, fake_B_raw, fake_B_feat, flow_feat, fake_B_fg_feat \
-                    = netG[s][net_id].forward(real_As_reshaped, fake_B_prevs_reshaped, mask_F, 
+                    = netG[s][net_id].forward(real_As_reshaped, real_B_all[:, -1], fake_B_prevs_reshaped, mask_F,
                                               fake_B_feat, flow_feat, fake_B_fg_feat, use_raw_only)
 
                 # if only training the finest scale, leave the coarser levels untouched
@@ -294,13 +294,13 @@ class Vid2VidModelG(BaseModel):
         netG.load_state_dict(torch.load(load_path))        
         return netG
 
-    def get_face_features(self, real_image, inst):                
-        feat_map = self.netE.forward(real_image, inst)            
+    def get_face_features(self, real_image, inst):
+        feat_map = self.netE.forward(real_image, inst)
         #if self.opt.use_encoded_image:
         #    return feat_map
         
         load_name = 'checkpoints/edge2face_single/features.npy'
-        features = np.load(load_name, encoding='latin1').item()                        
+        features = np.load(load_name, encoding='latin1').item()
         inst_np = inst.cpu().numpy().astype(int)
 
         # find nearest neighbor in the training dataset
